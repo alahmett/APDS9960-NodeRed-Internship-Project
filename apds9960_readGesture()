@@ -1,0 +1,118 @@
+//-------------------------------------------------------------------------------
+/**
+* @brief Processes a gesture event and returns best guessed gesture
+*
+* @return Number corresponding to gesture. -1 on error.
+*/
+int APDS9960::apds9960_readGesture()
+{
+	uint8_t fifo_level = 0;
+	uint8_t bytes_read = 0;
+	uint8_t fifo_data[128];
+	uint8_t gstatus;
+	int motion;
+	int i;
+
+	/**
+	for (int i = 0; i < 128; i++)
+	{
+	Serial.print("test ");
+	Serial.print(i);
+	Serial.print(": ");
+	Serial.println(fifo_data[i]);
+	}*/
+
+	/* Make sure that power and gesture is on and data is valid */
+	if (!apds9960_isGestureAvailable() || !(apds9960_getMode() & 0b01000001)) {
+		return DIR_NONE;
+	}
+
+	/* Keep looping as long as gesture data is valid */
+	while (1) {
+
+		/* Wait some time to collect next batch of FIFO data */
+		delay(FIFO_PAUSE_TIME);
+
+		/* Get the contents of the STATUS register. Is data still valid? */
+		if (!apds9960_wireReadDataByte(APDS9960_GSTATUS, gstatus)) {
+			return ERROR;
+		}
+
+		/* If we have valid data, read in FIFO */
+		if ((gstatus & APDS9960_GVALID) == APDS9960_GVALID) {
+
+			/* Read the current FIFO level */
+			if (!apds9960_wireReadDataByte(APDS9960_GFLVL, fifo_level)) {
+				return ERROR;
+			}
+
+			/* If there's stuff in the FIFO, read it into our data block */
+			if (fifo_level > 0) {
+				bytes_read = apds9960_wireReadDataBlock(APDS9960_GFIFO_U,
+					(uint8_t*)fifo_data,
+					(fifo_level * 4));
+				if (bytes_read == -1) {
+					return ERROR;
+				}
+
+        size_t n = sizeof(fifo_data) / sizeof(fifo_data[0]);
+				/* If at least 1 set of data, sort the data into U/D/L/R */
+				if (bytes_read >= 4) {
+					for (i = 0; i < bytes_read; i += 4) {
+						gesture_data_.u_data[gesture_data_.index] = \
+							fifo_data[i + 0];
+						gesture_data_.d_data[gesture_data_.index] = \
+							fifo_data[i + 1];
+						gesture_data_.l_data[gesture_data_.index] = \
+							fifo_data[i + 2];
+						gesture_data_.r_data[gesture_data_.index] = \
+							fifo_data[i + 3];
+						gesture_data_.index++;
+						gesture_data_.total_gestures++;
+
+						u_ptr = &gesture_data_.u_data[0];
+						d_ptr = &gesture_data_.d_data[0];
+						l_ptr = &gesture_data_.l_data[0];
+						r_ptr = &gesture_data_.r_data[0];
+
+						//		ptr = &gesture_data_;
+
+					}
+			
+
+					/* Filter and process gesture data. Decode near/far state */
+					if (apds9960_processGestureData()) {
+						if (apds9960_decodeGesture()) {
+							//***TODO: U-Turn Gestures
+
+
+
+						}
+					}
+
+					tot_num_gest = n/4;
+
+					/* Reset data */
+					gesture_data_.index = 0;
+					gesture_data_.total_gestures = 0;
+				}
+			}
+		}
+		else {
+
+			/* Determine best guessed gesture and clean up */
+			delay(FIFO_PAUSE_TIME);
+			apds9960_decodeGesture();
+			motion = gesture_motion_;
+
+
+
+			resetGestureParameters();
+
+
+
+
+			return motion;
+		}
+	}
+}
